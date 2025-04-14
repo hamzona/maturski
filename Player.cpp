@@ -29,6 +29,7 @@ Player::Player(int number, std::string name)
     start = std::find(mapPath.begin(), mapPath.end(), std::make_pair(4, 4));
     if (start == mapPath.end())
         std::cerr << "Start position {4, 4} not found in mapPath!" << std::endl;
+
     pawnPositions = startingCoo;
 }
 
@@ -90,12 +91,19 @@ void Player::updateMovement()
         if (it != path.end())
         {
             auto nextIt = it + 1;
+
             if (nextIt == path.end())
-                nextIt = path.begin();
-            pawnPositions[selectedPawnIndex] = *nextIt;
+            {
+                stepsRemaining = 0;
+            }
+            else
+            {
+                pawnPositions[selectedPawnIndex] = *nextIt;
+            }
         }
     }
-    stepsRemaining--;
+    if (stepsRemaining != 0)
+        stepsRemaining--;
 }
 
 bool Player::getIsMoving() const

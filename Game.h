@@ -4,15 +4,19 @@
 
 enum GameState
 {
+    STATE_SETUP,
     STATE_QUESTION,
     STATE_MOVE,
     STATE_PLAY_AGAIN,
-    STATE_START_GAME
+    STATE_START_GAME,
+    STATE_WIN
 };
 
 class Game
 {
 private:
+    int numberOfPlayers;
+
     sf::Clock moveClock;
     sf::RenderWindow window;
     sf::RectangleShape tile;
@@ -29,6 +33,7 @@ private:
     std::vector<Player> players;
     sf::Color playerColors[4] = {sf::Color::Red, sf::Color::Blue, sf::Color::Green, sf::Color::Yellow};
     std::vector<std::pair<sf::RectangleShape, sf::Text>> answers;
+
     void render();
     void processEvents();
     void update();
@@ -44,6 +49,9 @@ private:
     void changeState(GameState newState);
     void play_again_popup();
     void start_game_popup();
+    void setup();
+    void win_popup();
+    void handleWinClick(const sf::Vector2f &mousePos);
 
 public:
     Game();

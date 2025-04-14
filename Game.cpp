@@ -5,7 +5,7 @@
 #include <cstdlib>
 #include <ctime>
 
-Game::Game() : window(sf::VideoMode(windowSize * 2, windowSize), "test"), currentPlayerIndex(0)
+Game::Game() : window(sf::VideoMode(1200, 800), "test"), currentPlayerIndex(0)
 {
     window.setFramerateLimit(60);
     tile.setSize(sf::Vector2f(fieldSize, fieldSize));
@@ -16,7 +16,9 @@ Game::Game() : window(sf::VideoMode(windowSize * 2, windowSize), "test"), curren
     pawnCircle.setFillColor(sf::Color::Red);
     pawnCircle.setOutlineThickness(-1);
     pawnCircle.setOutlineColor(sf::Color::Black);
-    for (int i = 0; i < 4; i++)
+    numberOfPlayers = 4;
+
+    for (int i = 0; i < numberOfPlayers; i++)
     {
         players.emplace_back(i, "Player " + std::to_string(i + 1));
     }
@@ -30,7 +32,7 @@ void Game::changeState(GameState newState)
     if (newState == STATE_QUESTION)
     {
         if (state == STATE_MOVE)
-            currentPlayerIndex = (currentPlayerIndex == 3) ? 0 : currentPlayerIndex + 1;
+            currentPlayerIndex = (currentPlayerIndex == numberOfPlayers - 1) ? 0 : currentPlayerIndex + 1;
         else
             currentPlayerIndex = 0;
         rightAnswers = 0;
@@ -61,7 +63,10 @@ void Game::update()
         {
             handleLastPawnStep(currentPlayer.getSelectedPawnPosition());
             currentPlayer.isMoving = false;
-            changeState(STATE_QUESTION);
+            if (state != STATE_WIN)
+            {
+                changeState(STATE_QUESTION);
+            }
         }
         else if (moveClock.getElapsedTime().asMilliseconds() > 400)
         {
@@ -80,6 +85,9 @@ void Game::render()
     drawPawns();
     switch (state)
     {
+    case STATE_SETUP:
+        setup();
+        break;
     case STATE_QUESTION:
         popup();
         break;
@@ -88,6 +96,9 @@ void Game::render()
         break;
     case STATE_START_GAME:
         start_game_popup();
+        break;
+    case STATE_WIN:
+        win_popup();
         break;
     default:
         break;
@@ -102,10 +113,40 @@ void Game::processEvents()
     {
         if (event.type == sf::Event::Closed)
             window.close();
+
+        if (state == STATE_SETUP)
+        {
+            if (event.type == sf::Event::TextEntered)
+            {
+                if (event.text.unicode >= '2' && event.text.unicode <= '4')
+                {
+                    numberOfPlayers = int(static_cast<char>(event.text.unicode) - '0');
+                    players.clear();
+                    for (int i = 0; i < numberOfPlayers; i++)
+                        players.emplace_back(i, "Player " + std::to_string(i + 1));
+                }
+            }
+        }
+
         if (event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Left)
         {
             sf::Vector2f mousePos = window.mapPixelToCoords({event.mouseButton.x, event.mouseButton.y});
-            if (state == STATE_QUESTION)
+            if (state == STATE_SETUP)
+            {
+                float setupX = 650.f;
+                float inputBoxY = 50.f + 24.f + 20.f;            // prompt (at y = 50) with character size 24 + margin
+                float continueButtonY = inputBoxY + 50.f + 20.f; // inputBox height (50) plus margin (20)
+                sf::FloatRect continueBounds(setupX + 50.f, continueButtonY, 200.f, 50.f);
+                if (continueBounds.contains(mousePos))
+                {
+                    changeState(STATE_QUESTION);
+                }
+            }
+            else if (state == STATE_WIN)
+            {
+                handleWinClick(mousePos);
+            }
+            else if (state == STATE_QUESTION)
                 handleAnswerClick(mousePos);
             else if (state == STATE_MOVE)
                 handlePawnClick(mousePos);
@@ -113,17 +154,13 @@ void Game::processEvents()
             {
                 sf::RectangleShape startButton(sf::Vector2f(150.f, 50.f));
                 startButton.setPosition((window.getSize().x - 600.f) / 2.f + 50.f, (window.getSize().y - 400.f) / 2.f + 300.f);
-                sf::RectangleShape quitButton(sf::Vector2f(150.f, 50.f));
-                quitButton.setPosition((window.getSize().x - 600.f) / 2.f + 600.f - 200.f, (window.getSize().y - 400.f) / 2.f + 300.f);
                 if (startButton.getGlobalBounds().contains(mousePos))
-                    changeState(STATE_QUESTION);
+                    changeState(STATE_SETUP);
             }
             else if (state == STATE_PLAY_AGAIN)
             {
                 sf::RectangleShape yesButton(sf::Vector2f(150.f, 50.f));
                 yesButton.setPosition((window.getSize().x - 600.f) / 2.f + 50.f, (window.getSize().y - 400.f) / 2.f + 300.f);
-                sf::RectangleShape noButton(sf::Vector2f(150.f, 50.f));
-                noButton.setPosition((window.getSize().x - 600.f) / 2.f + 600.f - 200.f, (window.getSize().y - 400.f) / 2.f + 300.f);
                 if (yesButton.getGlobalBounds().contains(mousePos))
                     changeState(STATE_QUESTION);
             }
@@ -143,25 +180,21 @@ void Game::drawBoard()
 void Game::drawHomes()
 {
     for (auto &home : homes)
-    {
         for (auto &pos : home)
         {
             tile.setPosition(pos.first * fieldSize, pos.second * fieldSize);
             window.draw(tile);
         }
-    }
 }
 
 void Game::drawFinishZones()
 {
     for (auto &zone : finish)
-    {
         for (auto &pos : zone)
         {
             tile.setPosition(pos.first * fieldSize, pos.second * fieldSize);
             window.draw(tile);
         }
-    }
 }
 
 void Game::drawPawns()
@@ -169,15 +202,14 @@ void Game::drawPawns()
     for (int i = 0; i < players.size(); ++i)
     {
         pawnCircle.setFillColor(playerColors[i]);
-        std::vector<std::vector<std::pair<int, int>>> pawnsOnTheSameField = players[i].pawnsOnTheSameField();
-        for (const auto &group : pawnsOnTheSameField)
+        std::vector<std::vector<std::pair<int, int>>> groups = players[i].pawnsOnTheSameField();
+        for (const auto &group : groups)
         {
             switch (group.size())
             {
             case 1:
                 pawnCircle.setRadius(fieldSize / 2.5);
-                pawnCircle.setPosition(group[0].first * fieldSize + fieldSize / 4,
-                                       group[0].second * fieldSize + fieldSize / 4);
+                pawnCircle.setPosition(group[0].first * fieldSize + fieldSize / 4, group[0].second * fieldSize + fieldSize / 4);
                 window.draw(pawnCircle);
                 break;
             case 2:
@@ -185,8 +217,7 @@ void Game::drawPawns()
                 {
                     pawnCircle.setRadius(fieldSize / 3);
                     float offset = (j == 0) ? 0.f : fieldSize / 2;
-                    pawnCircle.setPosition(group[j].first * fieldSize + offset,
-                                           group[j].second * fieldSize + offset);
+                    pawnCircle.setPosition(group[j].first * fieldSize + offset, group[j].second * fieldSize + offset);
                     window.draw(pawnCircle);
                 }
                 break;
@@ -243,6 +274,53 @@ void Game::generateRandomIndexOfQuestion()
     indexOfQuestion = r;
 }
 
+void Game::setup()
+{
+    sf::Font font;
+    font.loadFromFile("Arial.ttf");
+    float setupX = 650.f;
+    float setupWidth = window.getSize().x - setupX;
+    sf::RectangleShape setupBackground(sf::Vector2f(setupWidth, window.getSize().y));
+    setupBackground.setFillColor(sf::Color::White);
+    setupBackground.setPosition(setupX, 0.f);
+    window.draw(setupBackground);
+    sf::Text prompt;
+    prompt.setFont(font);
+    prompt.setCharacterSize(24);
+    prompt.setFillColor(sf::Color::Black);
+    prompt.setString("Input the number of players (2, 3, or 4):");
+    prompt.setPosition(setupX + 50.f, 50.f);
+    window.draw(prompt);
+    sf::RectangleShape inputBox(sf::Vector2f(300.f, 50.f));
+    inputBox.setFillColor(sf::Color(255, 255, 255, 230));
+    inputBox.setOutlineColor(sf::Color::Black);
+    inputBox.setOutlineThickness(3.f);
+    inputBox.setPosition(setupX + 50.f, prompt.getPosition().y + prompt.getLocalBounds().height + 20.f);
+    window.draw(inputBox);
+    sf::Text inputText;
+    inputText.setFont(font);
+    inputText.setCharacterSize(24);
+    inputText.setFillColor(sf::Color::Black);
+    inputText.setString(std::to_string(numberOfPlayers));
+    inputText.setPosition(inputBox.getPosition().x + 10.f, inputBox.getPosition().y + 10.f);
+    window.draw(inputText);
+    sf::RectangleShape continueButton(sf::Vector2f(200.f, 50.f));
+    continueButton.setFillColor(sf::Color(200, 200, 200));
+    continueButton.setOutlineColor(sf::Color::Black);
+    continueButton.setOutlineThickness(3.f);
+    continueButton.setPosition(setupX + 50.f, inputBox.getPosition().y + inputBox.getSize().y + 20.f);
+    window.draw(continueButton);
+    sf::Text continueText;
+    continueText.setFont(font);
+    continueText.setCharacterSize(24);
+    continueText.setFillColor(sf::Color::Black);
+    continueText.setString("Continue");
+    sf::FloatRect contBounds = continueText.getLocalBounds();
+    continueText.setPosition(continueButton.getPosition().x + continueButton.getSize().x / 2.f - contBounds.width / 2.f,
+                             continueButton.getPosition().y + continueButton.getSize().y / 2.f - contBounds.height / 2.f - contBounds.top);
+    window.draw(continueText);
+}
+
 void Game::popup()
 {
     sf::RectangleShape popup(sf::Vector2f(600.f, windowSize));
@@ -254,9 +332,7 @@ void Game::popup()
     static bool fontLoaded = false;
     if (!fontLoaded)
     {
-        if (!font.loadFromFile("Arial.ttf"))
-        {
-        }
+        font.loadFromFile("Arial.ttf");
         fontLoaded = true;
     }
     sf::Text player_name(players[currentPlayerIndex].getName(), font, 30);
@@ -312,7 +388,6 @@ void Game::handleAnswerClick(const sf::Vector2f &mousePos)
             popup();
             window.display();
             sf::sleep(sf::seconds(1.f));
-
             if (questionNumber == 5)
                 changeState(STATE_MOVE);
             else
@@ -325,6 +400,32 @@ void Game::handleAnswerClick(const sf::Vector2f &mousePos)
     }
 }
 
+void Game::handleWinClick(const sf::Vector2f &mousePos)
+{
+
+    // Define win popup button bounds matching the ones in win_popup():
+    sf::FloatRect playAgainBounds(
+        (window.getSize().x - 600.f) / 2.f + 50.f,
+        (window.getSize().y - 400.f) / 2.f + 400.f - 100.f,
+        150.f, 50.f);
+    sf::FloatRect quitBounds(
+        (window.getSize().x - 600.f) / 2.f + 600.f - 200.f,
+        (window.getSize().y - 400.f) / 2.f + 400.f - 100.f,
+        150.f, 50.f);
+
+    if (playAgainBounds.contains(mousePos))
+    {
+        std::cout << "Play Again clicked" << std::endl;
+        // Transition to a new game state (for example, reset the game)
+        changeState(STATE_START_GAME);
+    }
+    else if (quitBounds.contains(mousePos))
+    {
+        std::cout << "Quit clicked" << std::endl;
+        window.close();
+    }
+}
+
 void Game::handlePawnClick(const sf::Vector2f &mousePos)
 {
     std::cout << currentPlayerIndex << std::endl;
@@ -334,7 +435,7 @@ void Game::handlePawnClick(const sf::Vector2f &mousePos)
     std::cout << currentPlayer.getName() << std::endl;
     if (currentPlayer.handlePawnClick(mousePos, fieldSize))
     {
-        currentPlayer.startMoving(rightAnswers);
+        currentPlayer.startMoving(4);
         moveClock.restart();
     }
 }
@@ -342,10 +443,13 @@ void Game::handlePawnClick(const sf::Vector2f &mousePos)
 void Game::handleLastPawnStep(std::pair<int, int> location)
 {
     if (players[currentPlayerIndex].isWin())
-        changeState(STATE_PLAY_AGAIN);
+    {
+        changeState(STATE_WIN);
+        std::cout << "Win" << std::endl;
+    }
     else
     {
-        for (int i = 0; i < 4; i++)
+        for (int i = 0; i < numberOfPlayers; i++)
         {
             if (i != currentPlayerIndex)
                 players[i].eatingPawn(location);
@@ -365,9 +469,7 @@ void Game::play_again_popup()
     static bool fontLoaded = false;
     if (!fontLoaded)
     {
-        if (!font.loadFromFile("Arial.ttf"))
-        {
-        }
+        font.loadFromFile("Arial.ttf");
         fontLoaded = true;
     }
     sf::Text title("Play Again?", font, 30);
@@ -409,9 +511,7 @@ void Game::start_game_popup()
     static bool fontLoaded = false;
     if (!fontLoaded)
     {
-        if (!font.loadFromFile("Arial.ttf"))
-        {
-        }
+        font.loadFromFile("Arial.ttf");
         fontLoaded = true;
     }
     sf::Text title("Start Game", font, 30);
@@ -439,4 +539,74 @@ void Game::start_game_popup()
     window.draw(quitButton);
     window.draw(startText);
     window.draw(quitText);
+}
+
+void Game::win_popup()
+{
+    // Load font (in a real application consider caching this resource)
+    sf::Font font;
+    if (!font.loadFromFile("Arial.ttf"))
+    {
+        // Handle error if necessary
+    }
+
+    // Create a popup background rectangle
+    sf::RectangleShape popup(sf::Vector2f(600.f, 400.f));
+    popup.setFillColor(sf::Color::White);
+    popup.setOutlineThickness(2.f);
+    popup.setOutlineColor(sf::Color::Black);
+    popup.setPosition((window.getSize().x - popup.getSize().x) / 2.f,
+                      (window.getSize().y - popup.getSize().y) / 2.f);
+
+    // Title text at the top of the popup
+    sf::Text title("Congratulations!", font, 30);
+    title.setFillColor(sf::Color::Black);
+    title.setPosition(popup.getPosition().x + 20.f, popup.getPosition().y + 20.f);
+
+    // Win message
+    sf::Text message("Player " + std::to_string(currentPlayerIndex + 1) + " win", font, 24);
+    message.setFillColor(sf::Color::Black);
+    message.setPosition(popup.getPosition().x + 20.f, popup.getPosition().y + 70.f);
+
+    // Create the "Play Again" button
+    sf::RectangleShape playAgainButton(sf::Vector2f(150.f, 50.f));
+    playAgainButton.setFillColor(sf::Color(200, 200, 200));
+    playAgainButton.setOutlineColor(sf::Color::Black);
+    playAgainButton.setOutlineThickness(1.f);
+    playAgainButton.setPosition(popup.getPosition().x + 50.f, popup.getPosition().y + popup.getSize().y - 100.f);
+
+    sf::Text playAgainText("Play Again", font, 20);
+    playAgainText.setFillColor(sf::Color::Black);
+    sf::FloatRect paBounds = playAgainText.getLocalBounds();
+    playAgainText.setPosition(
+        playAgainButton.getPosition().x + playAgainButton.getSize().x / 2.f - paBounds.width / 2.f,
+        playAgainButton.getPosition().y + playAgainButton.getSize().y / 2.f - paBounds.height / 2.f - paBounds.top);
+
+    // Create the "Quit" button
+    sf::RectangleShape quitButton(sf::Vector2f(150.f, 50.f));
+    quitButton.setFillColor(sf::Color(200, 200, 200));
+    quitButton.setOutlineColor(sf::Color::Black);
+    quitButton.setOutlineThickness(1.f);
+    quitButton.setPosition(popup.getPosition().x + popup.getSize().x - 200.f, popup.getPosition().y + popup.getSize().y - 100.f);
+
+    sf::Text quitText("Quit", font, 20);
+    quitText.setFillColor(sf::Color::Black);
+    sf::FloatRect qBounds = quitText.getLocalBounds();
+    quitText.setPosition(
+        quitButton.getPosition().x + quitButton.getSize().x / 2.f - qBounds.width / 2.f,
+        quitButton.getPosition().y + quitButton.getSize().y / 2.f - qBounds.height / 2.f - qBounds.top);
+
+    // Draw all the popup elements
+    window.draw(popup);
+    window.draw(title);
+    window.draw(message);
+    window.draw(playAgainButton);
+    window.draw(playAgainText);
+    window.draw(quitButton);
+    window.draw(quitText);
+
+    // Note: This function only draws the popup.
+    // You must handle input events (e.g., clicks on the playAgainButton and quitButton)
+    // in your main event loop. For example, you can store the bounds of these buttons in member variables
+    // and check mouse clicks against them.
 }
